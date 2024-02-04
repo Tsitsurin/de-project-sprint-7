@@ -61,7 +61,6 @@ def write_dm(df: pyspark.sql.DataFrame, dm_name: str, date: str) -> None:
     """
     df.write.mode('overwrite').parquet(f'/user/elburgan/analitics/{dm_name}/date={date}')
 
-
 date = "2022-05-05" #sys.argv[1]
 
 spark = get_spark_session(name='project_step2')
@@ -127,8 +126,6 @@ df_with_local_time = events.join(travels_df, ['user_id'], 'left') \
     .join(act_city, ['user_id'], 'left') \
     .join(user_home, ['user_id'], 'left') \
     .selectExpr('user_id', 'act_city', 'home_city', 'travel_count', 'travel_array', 'local_time')
-
-#write_dm(spark.createDataFrame(df_with_local_time), 'dm_users', date)
 
 df_with_local_time.write.mode('overwrite').parquet(f'/user/elburgan/analitics/dm_users/date={date}')
 
