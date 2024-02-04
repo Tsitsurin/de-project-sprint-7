@@ -3,6 +3,7 @@ findspark.init()
 findspark.find()
 import pyspark
 import pyspark.sql.functions as F 
+from pyspark.sql.functions import radians, cos, sin, asin, sqrt
 from pyspark.sql.types import FloatType, DateType
 from pyspark.sql.window import Window
 from pyspark.sql import SparkSession
@@ -13,6 +14,10 @@ os.environ['YARN_CONF_DIR'] = '/etc/hadoop/conf'
 os.environ['JAVA_HOME']='/usr'
 os.environ['SPARK_HOME'] ='/usr/lib/spark'
 os.environ['PYTHONPATH'] ='/usr/local/lib/python3.8'
+
+def main():
+    date = sys.argv[1]
+
 
 def get_spark_session(name=""):
     return SparkSession \
@@ -51,13 +56,35 @@ def df_local_time(events: pyspark.sql.DataFrame) -> pyspark.sql.DataFrame:
         .withColumn("local_time",F.from_utc_timestamp(F.col("TIME"),F.col('timezone')))\
         .select("TIME", "local_time", 'city', 'user_id')
 
+def haversine(lat1, lon1, lat2, lon2):
+    """
+    Рассчитывает расстояние между двумя точками по координатам (широта и долгота) с использованием формулы haversine.
+    """
+    R = 6371  # Радиус Земли в километрах
+
+    dlat = F.radians(lat2 - lat1)
+    dlon = F.radians(lon2 - lon1)
+
+    a = (
+        (F.sin(dlat / 2) ** 2) +
+        F.cos(F.radians(lat1)) * F.cos(F.radians(lat2)) * (F.sin(dlon / 2) ** 2)
+    )
+
+    c = 2 * F.atan2(sqrt(a), F.sqrt(1 - a))
+
+    distance = R * c
+
+    return distance
+
 spark = get_spark_session(name='project_step4')
+
+date = "2022-05-05" #sys.argv[1]
 
 path_geo = "/user/elburgan/data/geo_2"
 raw_path_geo_events = "/user/master/data/geo/events"
 
 events_geo = spark.read.parquet(raw_path_geo_events) \
-    .sample(0.05) \
+    .sample(0.01) \
     .where("event_type == 'message'")\
     .withColumn('user_id', F.col('event.message_from'))\
     .withColumnRenamed('lat', 'msg_lat')\
@@ -101,17 +128,43 @@ new = view_last_channel.join(view_last_channel.withColumnRenamed('user_id', 'use
     
 user_list = new.join(view_last,['user_id'],'inner') \
     .withColumnRenamed('lon','lon_user1') \
-    .withColumnRenamed('lat','lat_user1') \
-    .drop('city').drop('local_time')
+    .withColumnRenamed('lat','lat_user1') #\
+    #.drop('city').drop('local_time')
 
 user_list = user_list\
     .join(view_last, view_last['user_id'] == user_list['user_id2'], 'inner').drop(view_last['user_id']) \
     .withColumnRenamed('lon','lon_user2') \
-    .withColumnRenamed('lat','lat_user2') \
-    .drop(view_last['city'])
+    .withColumnRenamed('lat','lat_user2') #\
+    #.drop(view_last['city'])
 
-#считаешь расстояние
-    
-# выбираешь отправителя и получателя, объединяешь с первернутыми и оставляешь  уникальные
+user_list_distance = user_list\
+    .withColumn("distance", haversine(F.col("lat_user1"), F.col("lon_user1"), F.col("lat_user2"), F.col("lon_user2")))\
+    .filter(F.col("distance") <= 1.0)
 
-# вычетаешь  пары из выборки
+user_list_distinc = user_list_distance.select("user_id", "user_id2").distinct()
+
+user_convers_1 = events.selectExpr("event.message_to as user_id", "event.message_from as user_id2").distinct()
+
+user_convers_2 = events.selectExpr("event.message_from as user_id", "event.message_to as user_id2").distinct()
+
+all_user_convers = user_convers_1.union(user_convers_2).distinct()
+
+result_user_convers = all_user_convers.subtract(user_list_distinc)
+
+final_user_list = user_list_distance.alias("uld")\
+    .join(result_user_convers.selectExpr("user_id as ruc_user_id", "user_id2 as ruc_user_id2"), 
+        on=[F.col("uld.user_id") == F.col("ruc_user_id"),
+            F.col("uld.user_id2") == F.col("ruc_user_id2")],
+        how="inner")\
+    .select(
+        F.col("uld.user_id").alias("user_left"),
+        F.col("uld.user_id2").alias("user_right"),
+        F.col("uld.city").alias("zone"),
+        F.col("uld.local_time")
+    )\
+    .withColumn("processed_dttm", F.current_timestamp())
+
+final_user_list.write.mode('overwrite').parquet(f'/user/elburgan/analitics/recommendation_users/date={date}')
+
+if __name__ == "__main__":
+    main()

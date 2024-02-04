@@ -21,3 +21,12 @@
 Внутри `src` расположены две папки:
 - `/src/dags`;
 - `/src/sql`.
+
+
+
+Структура хранилища
+/user/elburgan/analitics/dm_users/
+/user/elburgan/analitics/events_zone/
+/user/elburgan/analitics/recommendation_users/
+
+Сохранять файл в виде date={date}, где {date} - дата запуска потока

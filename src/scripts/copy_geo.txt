@@ -1,1 +1,0 @@
-!hadoop fs -copyFromLocal /lessons/geo_2.csv /user/elburgan/data/geo_2
